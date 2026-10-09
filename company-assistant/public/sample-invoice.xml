@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<EInvoice>
+  <Header>
+    <EIid>SAMPLE-0001</EIid>
+    <EInvoiceTag>未签章示例</EInvoiceTag>
+    <Note>这是公司小助手用来试用拖拽的示例文件，不是真实发票，也没有数字签名。</Note>
+  </Header>
+  <EInvoiceData>
+    <SellerName>示例开票方</SellerName>
+    <BuyerName>示例受票方</BuyerName>
+    <Amount>128.00</Amount>
+  </EInvoiceData>
+</EInvoice>
