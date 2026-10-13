@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F4F1EA">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="点击实验"
+            android:textColor="#1C1B19"
+            android:textSize="24sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="在自己的屏幕上测点击。勾选功能里的分支后，程序只看你填的那一块区域。颜色达到比例，就按反应时间分布等一下，再在瞄准点附近点一下。落点带横向和纵向的高斯抖动。"
+            android:textColor="#3E3B36"
+            android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/overlay_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="悬浮窗：检查中"
+            android:textColor="#1C1B19"
+            android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/root_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="root：检查中"
+            android:textColor="#1C1B19"
+            android:textSize="15sp" />
+
+        <Button
+            android:id="@+id/grant_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="去允许悬浮窗"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/grant_overlay_root"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="用 root 授予悬浮窗"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/open_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="打开悬浮窗"
+            android:textAllCaps="false" />
+
+        <TextView
+            android:id="@+id/log_path"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:textColor="#5E5A54"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="悬浮条上有开始/暂停、设置、停止、退出。设置会再弹出一块浮层。四个分支默认都是关的，填好区域和颜色再勾选。"
+            android:textColor="#5E5A54"
+            android:textSize="13sp" />
+    </LinearLayout>
+</ScrollView>
