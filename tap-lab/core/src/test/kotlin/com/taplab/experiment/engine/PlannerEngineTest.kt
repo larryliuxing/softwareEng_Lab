@@ -4,8 +4,10 @@ import com.taplab.experiment.model.BranchId
 import com.taplab.experiment.model.ConfigCodec
 import com.taplab.experiment.model.Distribution
 import com.taplab.experiment.model.ExperimentConfig
+import com.taplab.experiment.model.Frame
 import com.taplab.experiment.model.TrialRecord
 import com.taplab.experiment.solidFrame
+import com.taplab.experiment.vision.ScanWindow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -78,7 +80,7 @@ class PlannerEngineTest {
         val taps = mutableListOf<Pair<Int, Int>>()
         var active = true
         val engine = ExperimentEngine(
-            capture = { frame },
+            capture = captureOf(frame),
             tap = { x, y -> taps += x to y },
             waiter = Waiter { _, still ->
                 active = false
@@ -101,6 +103,49 @@ class PlannerEngineTest {
         val engine = engine(frame, enabledOn(0xE53935), taps, mutableListOf(), clock = { 0L }) { _, _ -> true }
         assertEquals(StepResult.NO_MATCH, engine.step())
         assertTrue(taps.isEmpty())
+    }
+
+    @Test
+    fun disabledBranchesDoNotCapture() {
+        var captures = 0
+        val engine = ExperimentEngine(
+            capture = captureOf(solidFrame(4, 4, 0, 0, 0)) { captures++ },
+            tap = { _, _ -> },
+            waiter = { _, _ -> true },
+            clock = { 0L },
+            configSource = { ExperimentConfig.default() },
+            isActive = { true },
+            onTrial = {},
+            onStatus = {},
+        )
+        assertEquals(StepResult.NO_MATCH, engine.step())
+        assertEquals(0, captures)
+    }
+
+    @Test
+    fun idleWaitFillsOnlyTheRemainderOfTheInterval() {
+        var now = 1_000L
+        val frame = solidFrame(30, 30, 0, 0, 255)
+        val engine = ExperimentEngine(
+            capture = object : Capture {
+                override fun <T> use(block: (ScreenCropper) -> T): T {
+                    now += 50
+                    return block(staticCropper(frame))
+                }
+            },
+            tap = { _, _ -> },
+            waiter = Waiter { millis, _ ->
+                now += millis
+                true
+            },
+            clock = { now },
+            configSource = { enabledOn(0xE53935).copy(scanIntervalMs = 200) },
+            isActive = { true },
+            onTrial = {},
+            onStatus = {},
+        )
+        assertEquals(StepResult.NO_MATCH, engine.step())
+        assertEquals(1_200L, now)
     }
 
     private fun enabledOn(frameColor: Int): ExperimentConfig {
@@ -130,7 +175,7 @@ class PlannerEngineTest {
     }
 
     private fun engine(
-        frame: com.taplab.experiment.model.Frame,
+        frame: Frame,
         config: ExperimentConfig,
         taps: MutableList<Pair<Int, Int>>,
         trials: MutableList<TrialRecord>,
@@ -138,7 +183,7 @@ class PlannerEngineTest {
         waiter: Waiter,
     ): ExperimentEngine {
         return ExperimentEngine(
-            capture = { frame },
+            capture = captureOf(frame),
             tap = { x, y -> taps += x to y },
             waiter = waiter,
             clock = clock,
@@ -147,5 +192,22 @@ class PlannerEngineTest {
             onTrial = { trials += it },
             onStatus = {},
         )
+    }
+
+    private fun captureOf(frame: Frame, onUse: () -> Unit = {}): Capture {
+        return object : Capture {
+            override fun <T> use(block: (ScreenCropper) -> T): T {
+                onUse()
+                return block(staticCropper(frame))
+            }
+        }
+    }
+
+    private fun staticCropper(frame: Frame): ScreenCropper {
+        return object : ScreenCropper {
+            override val screenWidth = frame.width
+            override val screenHeight = frame.height
+            override fun crop(window: ScanWindow): Frame = frame
+        }
     }
 }

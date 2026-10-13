@@ -6,65 +6,97 @@ import kotlin.math.abs
 
 object ColorMatcher {
     fun matches(frame: Frame, branch: BranchConfig): Boolean {
-        val ratio = matchRatio(frame, branch) ?: return false
-        return ratio * 100.0 >= branch.matchPercent
-    }
-
-    fun colorAt(frame: Frame, x: Int, y: Int): Int? {
-        val (red, green, blue) = channels(frame, x, y) ?: return null
-        return (red shl 16) or (green shl 8) or blue
-    }
-
-    fun matchRatio(frame: Frame, branch: BranchConfig): Double? {
-        val x0 = maxOf(branch.regionX, 0)
-        val y0 = maxOf(branch.regionY, 0)
-        val x1 = minOf(branch.regionX + branch.regionW, frame.width)
-        val y1 = minOf(branch.regionY + branch.regionH, frame.height)
-        if (x0 >= x1 || y0 >= y1) return null
+        val left = maxOf(branch.regionX, frame.originX, 0)
+        val top = maxOf(branch.regionY, frame.originY, 0)
+        val right = minOf(branch.regionX + branch.regionW, frame.originX + frame.bufferWidth, frame.width)
+        val bottom = minOf(branch.regionY + branch.regionH, frame.originY + frame.bufferHeight, frame.height)
+        if (left >= right || top >= bottom) return false
+        val total = (right - left).toLong() * (bottom - top)
+        val percent = branch.matchPercent.toLong()
         val targetRed = (branch.color shr 16) and 0xFF
         val targetGreen = (branch.color shr 8) and 0xFF
         val targetBlue = branch.color and 0xFF
         val tolerance = branch.tolerance
+        var hits = 0L
+        var seen = 0L
+        for (y in top until bottom) {
+            for (x in left until right) {
+                seen++
+                if (near(frame, x, y, targetRed, targetGreen, targetBlue, tolerance)) hits++
+                if (hits * 100L >= percent * total) return true
+                val remaining = total - seen
+                if ((hits + remaining) * 100L < percent * total) return false
+            }
+        }
+        return hits * 100L >= percent * total
+    }
+
+    fun colorAt(frame: Frame, x: Int, y: Int): Int? {
+        val packed = packed(frame, x, y)
+        return if (packed < 0) null else packed
+    }
+
+    fun matchRatio(frame: Frame, branch: BranchConfig): Double? {
+        val left = maxOf(branch.regionX, frame.originX, 0)
+        val top = maxOf(branch.regionY, frame.originY, 0)
+        val right = minOf(branch.regionX + branch.regionW, frame.originX + frame.bufferWidth, frame.width)
+        val bottom = minOf(branch.regionY + branch.regionH, frame.originY + frame.bufferHeight, frame.height)
+        if (left >= right || top >= bottom) return null
+        val targetRed = (branch.color shr 16) and 0xFF
+        val targetGreen = (branch.color shr 8) and 0xFF
+        val targetBlue = branch.color and 0xFF
         var hits = 0
         var total = 0
-        for (y in y0 until y1) {
-            for (x in x0 until x1) {
-                val (red, green, blue) = channels(frame, x, y) ?: continue
+        for (y in top until bottom) {
+            for (x in left until right) {
                 total++
-                if (
-                    abs(red - targetRed) <= tolerance &&
-                    abs(green - targetGreen) <= tolerance &&
-                    abs(blue - targetBlue) <= tolerance
-                ) {
-                    hits++
-                }
+                if (near(frame, x, y, targetRed, targetGreen, targetBlue, branch.tolerance)) hits++
             }
         }
         if (total == 0) return null
         return hits.toDouble() / total.toDouble()
     }
 
-    private fun channels(frame: Frame, x: Int, y: Int): Triple<Int, Int, Int>? {
-        if (x !in 0 until frame.width || y !in 0 until frame.height) return null
+    private fun near(
+        frame: Frame,
+        x: Int,
+        y: Int,
+        targetRed: Int,
+        targetGreen: Int,
+        targetBlue: Int,
+        tolerance: Int,
+    ): Boolean {
+        val packed = packed(frame, x, y)
+        if (packed < 0) return false
+        return abs(((packed shr 16) and 0xFF) - targetRed) <= tolerance &&
+            abs(((packed shr 8) and 0xFF) - targetGreen) <= tolerance &&
+            abs((packed and 0xFF) - targetBlue) <= tolerance
+    }
+
+    private fun packed(frame: Frame, x: Int, y: Int): Int {
+        val localX = x - frame.originX
+        val localY = y - frame.originY
+        if (localX !in 0 until frame.bufferWidth || localY !in 0 until frame.bufferHeight) return -1
         val bytesPerPixel = when (frame.format) {
             1, 2, 5 -> 4
             3 -> 3
-            else -> return null
+            else -> return -1
         }
-        val index = (y * frame.width + x) * bytesPerPixel
-        if (index + bytesPerPixel > frame.pixels.size) return null
+        val index = (localY * frame.bufferWidth + localX) * bytesPerPixel
+        if (index < 0 || index + bytesPerPixel > frame.pixels.size) return -1
         val pixels = frame.pixels
-        return when (frame.format) {
-            5 -> Triple(
-                pixels[index + 2].toInt() and 0xFF,
-                pixels[index + 1].toInt() and 0xFF,
-                pixels[index].toInt() and 0xFF,
-            )
-            else -> Triple(
-                pixels[index].toInt() and 0xFF,
-                pixels[index + 1].toInt() and 0xFF,
-                pixels[index + 2].toInt() and 0xFF,
-            )
+        val red: Int
+        val green: Int
+        val blue: Int
+        if (frame.format == 5) {
+            blue = pixels[index].toInt() and 0xFF
+            green = pixels[index + 1].toInt() and 0xFF
+            red = pixels[index + 2].toInt() and 0xFF
+        } else {
+            red = pixels[index].toInt() and 0xFF
+            green = pixels[index + 1].toInt() and 0xFF
+            blue = pixels[index + 2].toInt() and 0xFF
         }
+        return (red shl 16) or (green shl 8) or blue
     }
 }

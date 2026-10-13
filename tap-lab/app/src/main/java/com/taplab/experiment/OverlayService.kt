@@ -13,6 +13,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.os.Process
 import com.taplab.experiment.engine.ExperimentEngine
 import com.taplab.experiment.engine.RootShell
 import com.taplab.experiment.engine.ScreenGrabber
@@ -29,6 +30,7 @@ import com.taplab.experiment.ui.dp
 import com.taplab.experiment.ui.screenHeight
 import com.taplab.experiment.ui.screenWidth
 import com.taplab.experiment.vision.ColorMatcher
+import com.taplab.experiment.vision.ScanWindow
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -62,13 +64,13 @@ class OverlayService : Service() {
         startInForeground()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         shell = RootShell()
-        grabber = ScreenGrabber(shell)
+        grabber = ScreenGrabber(shell, java.io.File(filesDir, "frame.raw"))
         val store = ConfigStore(this)
         trialLog = TrialLog(this)
         config = store.load()
         val tapper = TapInjector(shell)
         engine = ExperimentEngine(
-            capture = { grabber.capture() },
+            capture = grabber,
             tap = { x, y -> tapper.tap(x, y) },
             waiter = ThreadWaiter,
             clock = { System.currentTimeMillis() },
@@ -88,6 +90,8 @@ class OverlayService : Service() {
         state = RunState.IDLE
         worker?.interrupt()
         shell.cancel()
+        if (this::grabber.isInitialized) grabber.release()
+        if (this::trialLog.isInitialized) trialLog.close()
         removeSettings()
         if (this::control.isInitialized) {
             runCatching { windowManager.removeView(control) }
@@ -96,6 +100,7 @@ class OverlayService : Service() {
     }
 
     private fun loop() {
+        Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
         while (alive && !Thread.currentThread().isInterrupted) {
             if (state != RunState.RUNNING) {
                 if (!sleepQuietly(80)) break
@@ -191,10 +196,8 @@ class OverlayService : Service() {
         windowManager.addView(panel, params)
         Thread {
             try {
-                val frame = grabber.capture()
-                main.post {
-                    panel.setScreenInfo("当前截屏 ${frame.width}×${frame.height}")
-                }
+                val size = grabber.use { cropper -> cropper.screenWidth to cropper.screenHeight }
+                main.post { panel.setScreenInfo("当前截屏 ${size.first}×${size.second}") }
             } catch (error: Exception) {
                 main.post { panel.setScreenInfo(error.message ?: "还没截到屏幕") }
             }
@@ -205,10 +208,13 @@ class OverlayService : Service() {
         val panel = settings ?: return
         Thread {
             try {
-                val frame = grabber.capture()
-                val color = ColorMatcher.colorAt(frame, x, y)
+                val sample = grabber.use { cropper ->
+                    val frame = cropper.crop(ScanWindow(x, y, 1, 1))
+                    Triple(cropper.screenWidth, cropper.screenHeight, ColorMatcher.colorAt(frame, x, y))
+                }
+                val color = sample.third
                 main.post {
-                    panel.setScreenInfo("当前截屏 ${frame.width}×${frame.height}")
+                    panel.setScreenInfo("当前截屏 ${sample.first}×${sample.second}")
                     val editor = panel.editor(id) ?: return@post
                     if (color == null) {
                         editor.setHint("瞄准点不在这张截屏里")
@@ -239,7 +245,11 @@ class OverlayService : Service() {
         stopSelf()
     }
 
+    private var postedStatus = ""
+
     private fun postStatus(text: String) {
+        if (text == postedStatus) return
+        postedStatus = text
         main.post {
             if (this::control.isInitialized) control.setStatus(text)
         }

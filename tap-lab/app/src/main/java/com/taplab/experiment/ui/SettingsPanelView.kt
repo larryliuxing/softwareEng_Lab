@@ -89,7 +89,7 @@ class SettingsPanelView(
         form.addView(section("整体"))
         form.addView(distribution)
         form.addView(context.row("种子" to seedField, "间隔" to scanField))
-        form.addView(note("间隔是两轮扫描之间的毫秒。均匀分布使用每个分支的下限和上限；对数正态使用中位、离散和下限。"))
+        form.addView(note("间隔是两轮扫描之间的毫秒，默认 200。这台机器大约 4GB 内存，间隔再小通常只是多做整屏截图。均匀分布使用下限和上限；对数正态使用中位、离散和下限。"))
 
         addFunction(form, "一号功能", listOf(BranchId.F1B1, BranchId.F1B2), config)
         addFunction(form, "二号功能", listOf(BranchId.F2B1, BranchId.F2B2), config)

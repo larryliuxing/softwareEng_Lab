@@ -16,8 +16,10 @@ enum class BranchId(val functionName: String, val branchName: String, val key: S
 
 object Limits {
     const val MAX_DELAY_MS = 60_000L
-    const val MIN_SCAN_MS = 30L
+    const val MIN_SCAN_MS = 80L
     const val MAX_SCAN_MS = 5_000L
+    /** 单次从截屏里读进内存的上限。8 核、4GB 内存的环境装不下一整屏的反复分配。 */
+    const val MAX_FRAME_BYTES = 16_000_000
     const val MAX_DISPERSION = 2.0
     const val MAX_SIGMA_PX = 200.0
     const val MAX_PERCENT = 100
@@ -92,7 +94,7 @@ data class ExperimentConfig(
                 branches = BranchId.entries.associateWith { defaultBranch(it) },
                 distribution = Distribution.LOG_NORMAL,
                 seed = 1L,
-                scanIntervalMs = 100L,
+                scanIntervalMs = 200L,
             )
         }
     }
@@ -150,6 +152,10 @@ data class Frame(
     val height: Int,
     val format: Int,
     val pixels: ByteArray,
+    val originX: Int = 0,
+    val originY: Int = 0,
+    val bufferWidth: Int = width,
+    val bufferHeight: Int = height,
 )
 
 fun parseColor(text: String): Int? {
