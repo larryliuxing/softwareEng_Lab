@@ -32,5 +32,7 @@ android {
 }
 
 dependencies {
-    implementation(project(":core"))
+    implementation(project(":core")) {
+        exclude(group = "org.json", module = "json")
+    }
 }

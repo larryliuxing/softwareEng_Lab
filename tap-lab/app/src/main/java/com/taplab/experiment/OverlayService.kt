@@ -9,53 +9,56 @@ import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.Process
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.os.Process
-import com.taplab.experiment.engine.ExperimentEngine
+import com.taplab.experiment.engine.ModeRunner
 import com.taplab.experiment.engine.RootShell
 import com.taplab.experiment.engine.ScreenGrabber
 import com.taplab.experiment.engine.TapInjector
 import com.taplab.experiment.engine.ThreadWaiter
-import com.taplab.experiment.model.BranchId
-import com.taplab.experiment.model.ExperimentConfig
-import com.taplab.experiment.store.ConfigStore
-import com.taplab.experiment.store.TrialLog
-import com.taplab.experiment.ui.ControlBarView
+import com.taplab.experiment.model.GrabSpec
+import com.taplab.experiment.model.GrabSquare
+import com.taplab.experiment.model.ScreenSpec
+import com.taplab.experiment.store.ModeStore
+import com.taplab.experiment.ui.BearBar
+import com.taplab.experiment.ui.GrabOverlayView
 import com.taplab.experiment.ui.RunState
-import com.taplab.experiment.ui.SettingsPanelView
 import com.taplab.experiment.ui.dp
-import com.taplab.experiment.ui.screenHeight
-import com.taplab.experiment.ui.screenWidth
-import com.taplab.experiment.vision.ColorMatcher
-import com.taplab.experiment.vision.ScanWindow
-import java.util.Locale
+import com.taplab.experiment.vision.TemplateMatcher
+import java.util.UUID
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 class OverlayService : Service() {
     private val main = Handler(Looper.getMainLooper())
     private lateinit var windowManager: WindowManager
-    private lateinit var control: ControlBarView
-    private lateinit var controlParams: WindowManager.LayoutParams
+    private lateinit var bar: BearBar
+    private lateinit var barParams: WindowManager.LayoutParams
     private lateinit var shell: RootShell
     private lateinit var grabber: ScreenGrabber
-    private lateinit var engine: ExperimentEngine
-    private lateinit var trialLog: TrialLog
-    private var settings: SettingsPanelView? = null
-    private var settingsParams: WindowManager.LayoutParams? = null
+    private lateinit var runner: ModeRunner
+    private lateinit var store: ModeStore
 
     @Volatile
     private var state = RunState.IDLE
 
     @Volatile
-    private var config = ExperimentConfig.default()
-
-    @Volatile
     private var alive = true
 
+    @Volatile
+    private var grabbing = false
+
+    @Volatile
+    private var grabBusy = false
+
+    private var expanded = false
+    private var grabModeId: String? = null
+    private var grabView: GrabOverlayView? = null
     private var worker: Thread? = null
+    private var postedStatus = ""
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -64,37 +67,42 @@ class OverlayService : Service() {
         startInForeground()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         shell = RootShell()
+        store = ModeStore(this)
         grabber = ScreenGrabber(shell, java.io.File(filesDir, "frame.raw"))
-        val store = ConfigStore(this)
-        trialLog = TrialLog(this)
-        config = store.load()
         val tapper = TapInjector(shell)
-        engine = ExperimentEngine(
+        runner = ModeRunner(
             capture = grabber,
             tap = { x, y -> tapper.tap(x, y) },
             waiter = ThreadWaiter,
             clock = { System.currentTimeMillis() },
-            configSource = { config },
-            isActive = { state == RunState.RUNNING },
-            onTrial = { record -> trialLog.append(record) },
+            isActive = { state == RunState.RUNNING && !grabbing },
             onStatus = { text -> postStatus(text) },
+            random = java.util.Random(),
+            modeSource = { store.activeMode() },
+            templates = { mode -> store.loadTemplates(mode) },
         )
-        showControl(store)
+        showBar()
         worker = Thread(this::loop, "taplab-engine").also { it.start() }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_NOT_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_GRAB) {
+            val modeId = intent.getStringExtra(ModeEditorActivity.EXTRA_ID)
+            if (!modeId.isNullOrBlank()) beginGrab(modeId)
+        }
+        return START_NOT_STICKY
+    }
 
     override fun onDestroy() {
         alive = false
         state = RunState.IDLE
+        grabbing = false
         worker?.interrupt()
         shell.cancel()
         if (this::grabber.isInitialized) grabber.release()
-        if (this::trialLog.isInitialized) trialLog.close()
-        removeSettings()
-        if (this::control.isInitialized) {
-            runCatching { windowManager.removeView(control) }
+        removeGrab()
+        if (this::bar.isInitialized) {
+            runCatching { windowManager.removeView(bar) }
         }
         super.onDestroy()
     }
@@ -102,12 +110,12 @@ class OverlayService : Service() {
     private fun loop() {
         Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
         while (alive && !Thread.currentThread().isInterrupted) {
-            if (state != RunState.RUNNING) {
+            if (state != RunState.RUNNING || grabbing) {
                 if (!sleepQuietly(80)) break
                 continue
             }
             try {
-                engine.step()
+                runner.runOnce()
             } catch (error: Exception) {
                 postStatus(error.message ?: "出错")
                 if (!sleepQuietly(400)) break
@@ -115,36 +123,88 @@ class OverlayService : Service() {
         }
     }
 
-    private fun showControl(store: ConfigStore) {
-        control = ControlBarView(
-            this,
+    private fun showBar() {
+        bar = BearBar(
+            context = this,
+            onBear = { toggleExpanded() },
             onStartPause = { onStartPause() },
-            onSettings = { toggleSettings(store) },
+            onSettings = { openLibrary() },
             onStop = {
                 state = RunState.IDLE
-                control.render(state)
+                bar.render(state)
                 postStatus("已停止")
             },
             onExit = { exit() },
         )
-        control.render(state)
-        controlParams = overlayParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, focusable = false)
-        controlParams.x = dp(12)
-        controlParams.y = dp(72)
-        attachDrag(control.dragHandle, control, controlParams)
-        windowManager.addView(control, controlParams)
+        bar.render(state)
+        bar.setExpanded(false)
+        barParams = overlayParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.END
+            x = -dp(24)
+            y = dp(160)
+        }
+        windowManager.addView(bar, barParams)
+        attachHeadGesture()
+    }
+
+    private fun toggleExpanded() {
+        placeBar(peek = expanded)
+    }
+
+    private fun placeBar(peek: Boolean) {
+        expanded = !peek
+        bar.setExpanded(expanded)
+        barParams.x = if (expanded) dp(8) else -dp(24)
+        if (bar.isAttachedToWindow) {
+            runCatching { windowManager.updateViewLayout(bar, barParams) }
+        }
+    }
+
+    private fun attachHeadGesture() {
+        val threshold = dp(8)
+        var downRawY = 0f
+        var originY = 0
+        var dragging = false
+        bar.bear.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downRawY = event.rawY
+                    originY = barParams.y
+                    dragging = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dy = event.rawY - downRawY
+                    if (!dragging && abs(dy) > threshold) dragging = true
+                    if (dragging) {
+                        val maxY = (resources.displayMetrics.heightPixels - bar.height).coerceAtLeast(0)
+                        barParams.y = (originY + dy).roundToInt().coerceIn(0, maxY)
+                        runCatching { windowManager.updateViewLayout(bar, barParams) }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (!dragging && event.actionMasked == MotionEvent.ACTION_UP) bar.tapHead()
+                    true
+                }
+                else -> false
+            }
+        }
     }
 
     private fun onStartPause() {
         when (state) {
             RunState.RUNNING -> {
                 state = RunState.PAUSED
-                control.render(state)
+                bar.render(state)
                 postStatus("已暂停")
             }
             RunState.PAUSED -> {
                 state = RunState.RUNNING
-                control.render(state)
+                bar.render(state)
                 postStatus("继续")
             }
             RunState.IDLE -> {
@@ -152,14 +212,13 @@ class OverlayService : Service() {
                 Thread {
                     val rooted = shell.available()
                     main.post {
-                        if (state != RunState.IDLE) return@post
+                        if (!alive || state != RunState.IDLE) return@post
                         if (!rooted) {
                             postStatus("没有 root，不能截屏或点击")
                             return@post
                         }
-                        engine.reseedFromConfig()
                         state = RunState.RUNNING
-                        control.render(state)
+                        bar.render(state)
                         postStatus("开始")
                     }
                 }.start()
@@ -167,91 +226,134 @@ class OverlayService : Service() {
         }
     }
 
-    private fun toggleSettings(store: ConfigStore) {
-        if (settings != null) {
-            removeSettings()
-            return
-        }
-        val panelHeight = (screenHeight() * 0.72f).roundToInt()
-        val panel = SettingsPanelView(
-            context = this,
-            config = config,
-            logPath = trialLog.path(),
-            panelHeightPx = panelHeight,
-            onSample = { id, x, y -> sampleColor(id, x, y) },
-            onSave = { next ->
-                config = next
-                store.save(next)
-            },
-            onClose = { removeSettings() },
+    private fun openLibrary() {
+        placeBar(peek = true)
+        startActivity(
+            Intent(this, ModeLibraryActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
-        settings = panel
-        val width = minOf(dp(360), screenWidth() - dp(16))
-        settingsParams = overlayParams(width, panelHeight, focusable = true).also {
-            it.x = dp(8)
-            it.y = dp(128)
+    }
+
+    private fun beginGrab(modeId: String) {
+        if (state == RunState.RUNNING) {
+            state = RunState.PAUSED
+            bar.render(state)
+            postStatus("已暂停")
         }
-        val params = settingsParams ?: return
-        attachDrag(panel.dragHandle, panel, params)
-        windowManager.addView(panel, params)
-        Thread {
-            try {
-                val size = grabber.use { cropper -> cropper.screenWidth to cropper.screenHeight }
-                main.post { panel.setScreenInfo("当前截屏 ${size.first}×${size.second}") }
-            } catch (error: Exception) {
-                main.post { panel.setScreenInfo(error.message ?: "还没截到屏幕") }
-            }
-        }.start()
+        grabModeId = modeId
+        grabbing = true
+        placeBar(peek = true)
+        bar.visibility = View.GONE
+        if (grabView == null) showGrab()
     }
 
-    private fun sampleColor(id: BranchId, x: Int, y: Int) {
-        val panel = settings ?: return
+    private fun showGrab() {
+        val overlay = GrabOverlayView(
+            context = this,
+            onConfirm = { square -> confirmGrab(square) },
+            onCancel = { finishGrab(returnToEditor = true) },
+        )
+        grabView = overlay
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+        }
+        windowManager.addView(overlay, params)
+    }
+
+    private fun confirmGrab(square: GrabSquare) {
+        if (grabBusy) return
+        val modeId = grabModeId ?: return
+        grabBusy = true
+        postStatus("正在抓取")
         Thread {
             try {
-                val sample = grabber.use { cropper ->
-                    val frame = cropper.crop(ScanWindow(x, y, 1, 1))
-                    Triple(cropper.screenWidth, cropper.screenHeight, ColorMatcher.colorAt(frame, x, y))
+                val image = grabber.use { cropper ->
+                    val window = ScreenSpec.toFrameWindow(square, cropper.screenWidth, cropper.screenHeight)
+                    TemplateMatcher.fromFrame(cropper.crop(window))
                 }
-                val color = sample.third
-                main.post {
-                    panel.setScreenInfo("当前截屏 ${sample.first}×${sample.second}")
-                    val editor = panel.editor(id) ?: return@post
-                    if (color == null) {
-                        editor.setHint("瞄准点不在这张截屏里")
-                    } else {
-                        editor.setColor(color)
-                        editor.setHint("已采样 ${String.format(Locale.US, "%06X", color)}")
+                if (image == null) {
+                    main.post {
+                        grabBusy = false
+                        if (alive) postStatus("这块抓不到，换一块再试")
                     }
+                    return@Thread
+                }
+                val mode = store.load(modeId)
+                if (mode == null) {
+                    main.post {
+                        if (!alive) return@post
+                        postStatus("这个行为模式不在了")
+                        finishGrab(returnToEditor = false)
+                    }
+                    return@Thread
+                }
+                val grab = GrabSpec(
+                    id = UUID.randomUUID().toString(),
+                    name = "抓取${mode.grabs.size + 1}",
+                    centerX = square.centerX,
+                    centerY = square.centerY,
+                    side = square.side,
+                )
+                store.addGrab(modeId, grab, image)
+                main.post {
+                    if (!alive) return@post
+                    postStatus("已保存${grab.name}")
+                    finishGrab(returnToEditor = true)
                 }
             } catch (error: Exception) {
-                main.post { panel.editor(id)?.setHint(error.message ?: "采样失败") }
+                main.post {
+                    grabBusy = false
+                    if (alive) postStatus(error.message ?: "抓取失败")
+                }
             }
         }.start()
     }
 
-    private fun removeSettings() {
-        val panel = settings ?: return
-        runCatching { windowManager.removeView(panel) }
-        settings = null
-        settingsParams = null
+    private fun finishGrab(returnToEditor: Boolean) {
+        val modeId = grabModeId
+        grabbing = false
+        grabBusy = false
+        removeGrab()
+        if (this::bar.isInitialized) bar.visibility = View.VISIBLE
+        if (returnToEditor && modeId != null) {
+            startActivity(
+                Intent(this, ModeEditorActivity::class.java)
+                    .putExtra(ModeEditorActivity.EXTRA_ID, modeId)
+                    .addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP,
+                    ),
+            )
+        }
+    }
+
+    private fun removeGrab() {
+        val overlay = grabView ?: return
+        runCatching { windowManager.removeView(overlay) }
+        grabView = null
     }
 
     private fun exit() {
         alive = false
         state = RunState.IDLE
+        grabbing = false
         worker?.interrupt()
         shell.cancel()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
-    private var postedStatus = ""
-
     private fun postStatus(text: String) {
         if (text == postedStatus) return
         postedStatus = text
         main.post {
-            if (this::control.isInitialized) control.setStatus(text)
+            if (alive && this::bar.isInitialized) bar.setStatus(text)
         }
     }
 
@@ -261,56 +363,21 @@ class OverlayService : Service() {
         manager.createNotificationChannel(channel)
         val notification = Notification.Builder(this, CHANNEL)
             .setContentTitle("点击实验")
-            .setContentText("悬浮窗开着")
+            .setContentText("小熊贴在屏幕边上")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
             .build()
         startForeground(NOTIFICATION_ID, notification)
     }
 
-    private fun overlayParams(width: Int, height: Int, focusable: Boolean): WindowManager.LayoutParams {
-        val flags = if (focusable) {
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-        } else {
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-        }
+    private fun overlayParams(width: Int, height: Int): WindowManager.LayoutParams {
         return WindowManager.LayoutParams(
             width,
             height,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            flags,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT,
-        ).apply {
-            gravity = Gravity.START or Gravity.TOP
-            if (focusable) {
-                softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
-            }
-        }
-    }
-
-    private fun attachDrag(handle: View, root: View, params: WindowManager.LayoutParams) {
-        var originX = 0
-        var originY = 0
-        var downX = 0f
-        var downY = 0f
-        handle.setOnTouchListener { _, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    originX = params.x
-                    originY = params.y
-                    downX = event.rawX
-                    downY = event.rawY
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    params.x = originX + (event.rawX - downX).roundToInt()
-                    params.y = originY + (event.rawY - downY).roundToInt()
-                    runCatching { windowManager.updateViewLayout(root, params) }
-                    true
-                }
-                else -> false
-            }
-        }
+        )
     }
 
     private fun sleepQuietly(millis: Long): Boolean {
@@ -323,8 +390,9 @@ class OverlayService : Service() {
         }
     }
 
-    private companion object {
-        const val CHANNEL = "taplab"
-        const val NOTIFICATION_ID = 1001
+    companion object {
+        const val ACTION_GRAB = "com.taplab.experiment.action.GRAB"
+        private const val CHANNEL = "taplab"
+        private const val NOTIFICATION_ID = 1001
     }
 }

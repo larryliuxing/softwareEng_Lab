@@ -8,13 +8,14 @@ import android.app.Activity
 import android.widget.Button
 import android.widget.TextView
 import com.taplab.experiment.engine.RootShell
-import com.taplab.experiment.store.TrialLog
+import java.io.File
 
 class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        findViewById<TextView>(R.id.log_path).text = "试验记录\n${TrialLog(this).path()}"
+        val export = File(getExternalFilesDir(null) ?: filesDir, "export")
+        findViewById<TextView>(R.id.log_path).text = "导出目录\n${export.absolutePath}"
         findViewById<Button>(R.id.grant_overlay).setOnClickListener {
             val intent = Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
