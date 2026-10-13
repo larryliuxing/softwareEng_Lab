@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F4F1EA">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="点击实验"
+            android:textColor="#1C1B19"
+            android:textSize="24sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="分辨率按 720×1080 来记。行为模式在 Windows 上配：打开一张截图做抓取，排好点击、延时和对比，再导出文件夹。拷到下面的 inbox 目录后，在小熊的设置里点导入。手机上也可以直接新建。"
+            android:textColor="#3E3B36"
+            android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/overlay_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="悬浮窗：检查中"
+            android:textColor="#1C1B19"
+            android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/root_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="root：检查中"
+            android:textColor="#1C1B19"
+            android:textSize="15sp" />
+
+        <Button
+            android:id="@+id/grant_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="去允许悬浮窗"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/grant_overlay_root"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="用 root 授予悬浮窗"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/open_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="打开悬浮窗"
+            android:textAllCaps="false" />
+
+        <TextView
+            android:id="@+id/log_path"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:textColor="#5E5A54"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="先打开悬浮窗，点小熊，再点设置。导入或读取一个行为模式后，回到小熊点开始。循环里的对比会按抓取时的中心和边长去看当前画面。"
+            android:textColor="#5E5A54"
+            android:textSize="13sp" />
+    </LinearLayout>
+</ScrollView>
