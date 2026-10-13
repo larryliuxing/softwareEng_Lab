@@ -12,6 +12,8 @@ import kotlin.math.roundToInt
 
 fun Context.dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
 
+fun android.view.View.dp(value: Int): Int = context.dp(value)
+
 fun Context.screenWidth(): Int = resources.displayMetrics.widthPixels
 
 fun Context.screenHeight(): Int = resources.displayMetrics.heightPixels

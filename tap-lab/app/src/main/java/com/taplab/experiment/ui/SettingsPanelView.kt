@@ -192,7 +192,7 @@ class SettingsPanelView(
 
 class BranchEditor(
     context: Context,
-    private val id: BranchId,
+    private val branchId: BranchId,
     initial: BranchConfig,
     private val onSample: (BranchId, Int, Int) -> Unit,
 ) {
@@ -202,7 +202,7 @@ class BranchEditor(
         setPadding(context.dp(8), context.dp(8), context.dp(8), context.dp(8))
     }
     private val enabledBox = android.widget.CheckBox(context).apply {
-        text = id.branchName
+        text = branchId.branchName
         setTextColor(0xFF1C1B19.toInt())
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
     }
@@ -259,7 +259,7 @@ class BranchEditor(
                     return@setOnClickListener
                 }
                 setHint("采样中")
-                onSample(id, x, y)
+                onSample(branchId, x, y)
             }
         }
         view.addView(sample, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
@@ -303,7 +303,7 @@ class BranchEditor(
     }
 
     fun read(): BranchConfig {
-        val title = "${id.functionName}${id.branchName}"
+        val title = "${branchId.functionName}${branchId.branchName}"
         val color = parseColor(colorField.text?.toString().orEmpty())
             ?: throw IllegalArgumentException("$title 的颜色要写成 RRGGBB")
         return BranchConfig(
