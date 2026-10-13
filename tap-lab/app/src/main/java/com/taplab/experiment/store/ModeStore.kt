@@ -4,6 +4,8 @@ import android.content.Context
 import com.taplab.experiment.model.BehaviorCodec
 import com.taplab.experiment.model.BehaviorMode
 import com.taplab.experiment.model.GrabSpec
+import com.taplab.experiment.model.ModeBundle
+import com.taplab.experiment.model.ModePackage
 import com.taplab.experiment.model.sanitized
 import com.taplab.experiment.vision.TemplateFile
 import com.taplab.experiment.vision.TemplateImage
@@ -92,15 +94,37 @@ class ModeStore(context: Context) {
 
     fun export(mode: BehaviorMode): File {
         synchronized(lock) {
-            val folder = File(exports, safe(mode.name) + "-" + mode.id.take(8))
-            folder.mkdirs()
-            File(folder, "mode.json").writeText(BehaviorCodec.encode(mode.sanitized()))
-            mode.grabs.forEach { grab ->
-                val source = templateFile(grab.id)
-                if (source.exists()) source.copyTo(File(folder, "${grab.id}.bin"), overwrite = true)
-            }
+            val folder = File(exports, ModePackage.folderName(mode))
+            ModePackage.write(folder, ModeBundle(mode, loadTemplates(mode)))
             return folder
         }
+    }
+
+    fun importBundle(bundle: ModeBundle): BehaviorMode {
+        synchronized(lock) {
+            val mode = bundle.mode.sanitized()
+            val keep = mode.grabs.map { it.id }.toSet()
+            loadUnlocked(mode.id)?.grabs?.forEach { grab ->
+                if (grab.id !in keep) templateFile(grab.id).delete()
+            }
+            mode.grabs.forEach { grab ->
+                val image = bundle.templates[grab.id] ?: return@forEach
+                writeTemplate(image, grab.id)
+            }
+            saveUnlocked(mode)
+            return mode
+        }
+    }
+
+    fun inbox(): File = File(exports.parentFile ?: root, "inbox")
+
+    fun inboxFolders(): List<File> {
+        val dir = inbox()
+        if (!dir.isDirectory) return emptyList()
+        return dir.listFiles()
+            ?.filter { it.isDirectory && File(it, ModePackage.FILE_NAME).isFile }
+            ?.sortedBy { it.name }
+            ?: emptyList()
     }
 
     private fun loadUnlocked(id: String): BehaviorMode? {
@@ -120,11 +144,6 @@ class ModeStore(context: Context) {
     }
 
     private fun templateFile(grabId: String): File = File(templates, "$grabId.bin")
-
-    private fun safe(name: String): String {
-        val cleaned = name.replace(Regex("[^A-Za-z0-9\\u4e00-\\u9fff_-]"), "_").take(40)
-        return cleaned.ifBlank { "mode" }
-    }
 
     private companion object {
         val lock = Any()

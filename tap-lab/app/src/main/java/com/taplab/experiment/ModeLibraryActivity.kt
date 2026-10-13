@@ -2,12 +2,16 @@ package com.taplab.experiment
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.os.Bundle
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.taplab.experiment.model.BehaviorMode
+import com.taplab.experiment.model.ModePackage
 import com.taplab.experiment.store.ModeStore
+import com.taplab.experiment.store.PackageImporter
+import java.io.File
 import com.taplab.experiment.ui.asLabel
 import com.taplab.experiment.ui.dp
 import com.taplab.experiment.ui.rounded
@@ -32,7 +36,7 @@ class ModeLibraryActivity : Activity() {
             asLabel(22f, 0xFF1C1B19.toInt())
         })
         root.addView(TextView(this).apply {
-            text = "分辨率固定 720×1080。模式保存在这台设备上，导出后可以把文件夹拷走。"
+            text = "分辨率固定 720×1080。可以在 Windows 上配好再导入，也可以在这里新建。导入后点读取，回到小熊点开始。"
             asLabel(13f, 0xFF5E5A54.toInt())
             setPadding(0, dp(8), 0, dp(12))
         })
@@ -45,9 +49,16 @@ class ModeLibraryActivity : Activity() {
             setPadding(0, dp(8), 0, dp(8))
         }
         root.addView(message)
-        root.addView(textButton("新建", 0xFF1C1B19.toInt(), 0xFFF4F1EA.toInt()).apply {
+        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        buttons.addView(textButton("新建", 0xFF1C1B19.toInt(), 0xFFF4F1EA.toInt()).apply {
             setOnClickListener { createMode() }
         })
+        buttons.addView(textButton("导入", 0xFF3A3834.toInt(), 0xFFF4F1EA.toInt()).apply {
+            setOnClickListener { showImport() }
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            marginStart = dp(8)
+        })
+        root.addView(buttons)
         setContentView(root)
     }
 
@@ -120,6 +131,66 @@ class ModeLibraryActivity : Activity() {
         startActivity(android.content.Intent(this, ModeEditorActivity::class.java).putExtra(ModeEditorActivity.EXTRA_ID, mode.id))
     }
 
+    private fun showImport() {
+        val folders = store.inboxFolders()
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+        }
+        box.addView(TextView(this).apply {
+            text = "把 Windows 导出的文件夹拷到\n${store.inbox().absolutePath}\n里面每个模式单独放一个文件夹。也可以直接从文件管理器选。"
+            asLabel(13f, 0xFF5E5A54.toInt())
+        })
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("导入行为模式")
+            .setView(ScrollView(this).apply { addView(box) })
+            .setNegativeButton("取消", null)
+            .create()
+        folders.forEach { folder ->
+            box.addView(textButton(folder.name, 0xFF3A3834.toInt(), 0xFFF4F1EA.toInt()).apply {
+                setOnClickListener {
+                    dialog.dismiss()
+                    importResult(runCatching { ModePackage.read(folder) })
+                }
+            })
+        }
+        box.addView(textButton("从文件管理器选择", 0xFF1C1B19.toInt(), 0xFFF4F1EA.toInt()).apply {
+            setOnClickListener {
+                dialog.dismiss()
+                startActivityForResult(
+                    Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                    REQUEST_IMPORT,
+                )
+            }
+        })
+        dialog.show()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_IMPORT || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        val scratch = File(cacheDir, "import-scratch")
+        val result = runCatching { PackageImporter.readTree(contentResolver, uri, scratch) }
+        scratch.deleteRecursively()
+        importResult(result)
+    }
+
+    private fun importResult(result: Result<com.taplab.experiment.model.ModeBundle>) {
+        val bundle = result.getOrElse { error ->
+            message.text = error.message ?: "导入失败"
+            return
+        }
+        val mode = store.importBundle(bundle)
+        val missing = mode.grabs.count { bundle.templates[it.id] == null }
+        message.text = if (missing == 0) {
+            "已导入「${mode.name}」。点读取后，回到小熊点开始。"
+        } else {
+            "已导入「${mode.name}」，有 $missing 个抓取没有图片。"
+        }
+        render()
+    }
+
     private fun confirmDelete(mode: BehaviorMode) {
         AlertDialog.Builder(this)
             .setMessage("删除「${mode.name}」？抓取的图片也会一起删掉。")
@@ -129,5 +200,9 @@ class ModeLibraryActivity : Activity() {
             }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    private companion object {
+        const val REQUEST_IMPORT = 41
     }
 }

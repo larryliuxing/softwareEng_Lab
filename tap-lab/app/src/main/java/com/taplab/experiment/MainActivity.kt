@@ -14,8 +14,8 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        val export = File(getExternalFilesDir(null) ?: filesDir, "export")
-        findViewById<TextView>(R.id.log_path).text = "导出目录\n${export.absolutePath}"
+        val inbox = File(getExternalFilesDir(null) ?: filesDir, "inbox")
+        findViewById<TextView>(R.id.log_path).text = "把 Windows 导出的文件夹拷到\n${inbox.absolutePath}"
         findViewById<Button>(R.id.grant_overlay).setOnClickListener {
             val intent = Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,

@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "tap-lab"
-include(":core", ":app")
+include(":core", ":app", ":desktop")

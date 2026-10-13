@@ -60,12 +60,7 @@ object TemplateFile {
 object TemplateMatcher {
     fun matches(frame: Frame, template: TemplateImage, tolerance: Int, matchPercent: Int): Boolean {
         if (frame.bufferWidth != template.width || frame.bufferHeight != template.height) return false
-        if (frame.format != template.format) return false
-        val bytesPerPixel = when (frame.format) {
-            1, 2, 5 -> 4
-            3 -> 3
-            else -> return false
-        }
+        val bytesPerPixel = sharedBytesPerPixel(frame.format, template.format) ?: return false
         val total = template.width.toLong() * template.height
         if (total <= 0L) return false
         val percent = matchPercent.coerceIn(1, 100).toLong()
@@ -116,6 +111,21 @@ object TemplateMatcher {
             if (abs(frameChannel - templateChannel) > tolerance) return false
         }
         return true
+    }
+
+    private fun sharedBytesPerPixel(frameFormat: Int, templateFormat: Int): Int? {
+        val frameBytes = bytesPerPixel(frameFormat)
+        val templateBytes = bytesPerPixel(templateFormat)
+        if (frameBytes == 0 || frameBytes != templateBytes) return null
+        return frameBytes
+    }
+
+    private fun bytesPerPixel(format: Int): Int {
+        return when (format) {
+            1, 2, 5 -> 4
+            3 -> 3
+            else -> 0
+        }
     }
 
     private fun channelAt(format: Int, pixels: ByteArray, pixelIndex: Int, channel: Int): Int {
